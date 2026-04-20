@@ -1210,12 +1210,20 @@
       const b = document.createElement("button");
       b.textContent = label;
       b.className = "w-full py-3 bg-yellow-400 hover:bg-yellow-300 text-zinc-900 font-bold rounded-2xl transition mb-2";
-      b.addEventListener("click", () => {
-        try { closeQrScanner(); } catch(e) { hideModal("qrScannerModal"); }
+      let triggered = false;
+      const fire = (e) => {
+        if (triggered) return;
+        triggered = true;
+        if (e) { try { e.preventDefault(); } catch(_) {} }
+        try { closeQrScanner(); } catch(_) { hideModal("qrScannerModal"); }
         setTimeout(() => {
-          try { handler(); } catch(e) { showToast("Action failed: " + (e?.message || e), "error"); }
+          try { handler(); } catch(err) { showToast("Action failed: " + (err?.message || err), "error"); }
         }, 80);
-      });
+      };
+      b.addEventListener("click", fire);
+      b.addEventListener("touchend", fire);
+      b.style.touchAction = "manipulation";
+      b.style.cursor = "pointer";
       actionsDiv.appendChild(b);
     };
 
