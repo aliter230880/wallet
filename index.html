@@ -1175,10 +1175,14 @@
     hideModal("qrScannerModal");
   }
 
+  let lastScannedQR = null;
+
   function handleScannedQR(text) {
     if (html5QrScanner) {
       html5QrScanner.stop().catch(() => {});
     }
+
+    lastScannedQR = text;
 
     const statusEl = document.getElementById("qrScannerStatus");
     if (statusEl) statusEl.textContent = "QR code detected!";
@@ -1188,55 +1192,111 @@
     const actionsDiv = document.getElementById("qrScannerActions");
     if (resultText) resultText.textContent = text;
     if (resultDiv) resultDiv.classList.remove("hidden");
+    if (!actionsDiv) return;
 
-    let actionsHtml = '';
+    actionsDiv.innerHTML = "";
 
+    const makeBtn = (label, handler) => {
+      const b = document.createElement("button");
+      b.textContent = label;
+      b.className = "w-full py-3 bg-yellow-400 hover:bg-yellow-300 text-zinc-900 font-bold rounded-2xl transition mb-2";
+      b.addEventListener("click", () => {
+        closeQrScanner();
+        setTimeout(handler, 50);
+      });
+      actionsDiv.appendChild(b);
+    };
+
+    let matched = false;
+
+    // 1) AliTerra payment URL
     if (text.includes("wallet.aliterra.space") && text.includes("pay=1")) {
       try {
-        const url = new URL(text);
-        const p = url.searchParams;
-        actionsHtml = `
-          <button onclick="closeQrScanner(); processScannedPayment('${text}')"
-            class="w-full py-3 bg-yellow-400 hover:bg-yellow-300 text-zinc-900 font-bold rounded-2xl transition mb-2">
-            Open Payment Request
-          </button>`;
+        new URL(text);
+        makeBtn("Open Payment Request", () => processScannedPayment(text));
+        matched = true;
       } catch(e) {}
     }
 
-    if (ethers.isAddress(text)) {
-      actionsHtml += `
-        <button onclick="closeQrScanner(); prefillSendAddress('${text}')"
-          class="w-full py-3 bg-yellow-400 hover:bg-yellow-300 text-zinc-900 font-bold rounded-2xl transition mb-2">
-          Send to this address
-        </button>`;
+    // 2) Plain Ethereum address
+    if (!matched && typeof ethers !== "undefined" && ethers.isAddress && ethers.isAddress(text)) {
+      makeBtn("Send to this address", () => prefillSendAddress(text));
+      matched = true;
     }
 
-    if (text.startsWith("ethereum:")) {
-      actionsHtml += `
-        <button onclick="closeQrScanner(); processEIP681('${encodeURIComponent(text)}')"
-          class="w-full py-3 bg-yellow-400 hover:bg-yellow-300 text-zinc-900 font-bold rounded-2xl transition mb-2">
-          Process Payment
-        </button>`;
+    // 3) EIP-681 ethereum: URI
+    if (!matched && text.startsWith("ethereum:")) {
+      makeBtn("Process Payment", () => processEIP681(text));
+      matched = true;
     }
 
-    actionsHtml += `
-      <button onclick="closeQrScanner()"
-        class="w-full py-3 bg-white/8 hover:bg-white/12 border border-white/15 text-white font-semibold rounded-2xl transition text-sm">
-        Close
-      </button>`;
+    // 4) Generic URL fallback — try as payment link anyway if it has pay=1
+    if (!matched) {
+      try {
+        const u = new URL(text);
+        if (u.searchParams.get("pay") === "1" && u.searchParams.get("to")) {
+          makeBtn("Open Payment Request", () => processScannedPayment(text));
+          matched = true;
+        }
+      } catch(e) {}
+    }
 
-    if (actionsDiv) actionsDiv.innerHTML = actionsHtml;
+    if (!matched) {
+      const info = document.createElement("p");
+      info.className = "text-zinc-400 text-xs text-center mb-2";
+      info.textContent = "Unrecognised QR format";
+      actionsDiv.appendChild(info);
+    }
+
+    const closeBtn = document.createElement("button");
+    closeBtn.textContent = "Close";
+    closeBtn.className = "w-full py-3 bg-white/8 hover:bg-white/12 border border-white/15 text-white font-semibold rounded-2xl transition text-sm";
+    closeBtn.addEventListener("click", closeQrScanner);
+    actionsDiv.appendChild(closeBtn);
+  }
+
+  function openPaymentRequestFromParams(params) {
+    pendingPayment = null;
+    const to       = params.get("to");
+    const amount   = params.get("amount");
+    const chain    = parseInt(params.get("chain") || "137");
+    const token    = params.get("token") || "";
+    const contract = params.get("contract") || "";
+    const decimals = parseInt(params.get("decimals") || "18");
+
+    if (!to || !amount) {
+      showToast("Payment link missing recipient or amount", "error");
+      return;
+    }
+
+    pendingPayment = { to, amount, chain, token, contract, decimals };
+
+    const netName  = NETWORKS[chain]?.name || `Chain ${chain}`;
+    const currency = token || NETWORKS[chain]?.currency || "ETH";
+
+    const elTo  = document.getElementById("payReqTo");
+    const elAmt = document.getElementById("payReqAmount");
+    const elTok = document.getElementById("payReqToken");
+    const elNet = document.getElementById("payReqNetwork");
+    if (elTo)  elTo.textContent  = to;
+    if (elAmt) elAmt.textContent = amount;
+    if (elTok) elTok.textContent = currency;
+    if (elNet) elNet.textContent = netName;
+
+    if (wallet.address && wallet.signer) {
+      showPayReqForLoggedIn();
+    } else {
+      document.getElementById("payReqWalletActions")?.classList.add("hidden");
+      document.getElementById("payReqNoWallet")?.classList.remove("hidden");
+    }
+
+    showModal("payRequestModal");
   }
 
   function processScannedPayment(urlStr) {
     try {
       const url = new URL(urlStr);
-      const params = url.searchParams;
-      const fakeSearch = "?" + params.toString();
-      const origSearch = window.location.search;
-      window.history.replaceState({}, "", window.location.pathname + fakeSearch);
-      checkPaymentRequest();
-      window.history.replaceState({}, "", window.location.pathname + origSearch);
+      openPaymentRequestFromParams(url.searchParams);
     } catch(e) {
       showToast("Invalid payment link", "error");
     }
@@ -1244,21 +1304,71 @@
 
   function prefillSendAddress(addr) {
     showSendModal();
-    const input = document.getElementById("sendToAddress");
-    if (input) input.value = addr;
+    setTimeout(() => {
+      const input = document.getElementById("sendToAddress");
+      if (input) {
+        input.value = addr;
+        input.dispatchEvent(new Event("input", { bubbles: true }));
+      }
+    }, 50);
   }
 
-  function processEIP681(encodedUri) {
-    const uri = decodeURIComponent(encodedUri);
+  function processEIP681(uri) {
     try {
-      const match = uri.match(/^ethereum:(0x[a-fA-F0-9]{40})/);
-      if (match) {
-        prefillSendAddress(match[1]);
-      } else {
+      // ethereum:<address>[@chainId][/function][?param=value&...]
+      const m = uri.match(/^ethereum:(0x[a-fA-F0-9]{40})(@(\d+))?(\/(\w+))?(\?(.*))?$/);
+      if (!m) {
         showToast("Unsupported EIP-681 format", "error");
+        return;
       }
+      const target  = m[1];
+      const chainId = m[3] ? parseInt(m[3]) : null;
+      const fn      = m[5] || null;
+      const qs      = m[7] ? new URLSearchParams(m[7]) : new URLSearchParams();
+
+      // ERC-20 transfer: ethereum:<token>@<chain>/transfer?address=<to>&uint256=<amt>
+      if (fn === "transfer") {
+        const to  = qs.get("address");
+        const amt = qs.get("uint256") || qs.get("value");
+        if (!to || !amt) {
+          showToast("Invalid transfer link", "error");
+          return;
+        }
+        const tokenInfo = Object.entries(wallet.tokens || {}).find(
+          ([sym, t]) => t.address && t.address.toLowerCase() === target.toLowerCase()
+        );
+        const decimals = tokenInfo ? (tokenInfo[1].decimals || 18) : 18;
+        const symbol   = tokenInfo ? tokenInfo[0] : "";
+        const human    = (Number(amt) / Math.pow(10, decimals)).toString();
+
+        const params = new URLSearchParams();
+        params.set("to", to);
+        params.set("amount", human);
+        params.set("chain", String(chainId || wallet.networkId || 137));
+        if (symbol)  params.set("token", symbol);
+        params.set("contract", target);
+        params.set("decimals", String(decimals));
+        openPaymentRequestFromParams(params);
+        return;
+      }
+
+      // Native send: ethereum:<to>[@chain]?value=<wei>
+      const valueWei = qs.get("value");
+      if (valueWei) {
+        const human = (BigInt(valueWei) / 10n ** 14n).toString();
+        const eth   = (Number(human) / 10000).toString();
+        const params = new URLSearchParams();
+        params.set("to", target);
+        params.set("amount", eth);
+        params.set("chain", String(chainId || wallet.networkId || 137));
+        openPaymentRequestFromParams(params);
+        return;
+      }
+
+      // Address only — fall back to Send form
+      prefillSendAddress(target);
     } catch(e) {
-      showToast("Failed to parse", "error");
+      showToast("Failed to parse payment link", "error");
     }
   }
 
