@@ -1167,10 +1167,20 @@
   }
 
   function closeQrScanner() {
-    if (html5QrScanner) {
-      html5QrScanner.stop().catch(() => {});
-      html5QrScanner.clear();
-      html5QrScanner = null;
+    const scanner = html5QrScanner;
+    html5QrScanner = null;
+    if (scanner) {
+      try {
+        const p = scanner.stop();
+        if (p && typeof p.then === "function") {
+          p.then(() => { try { scanner.clear(); } catch(e) {} })
+           .catch(() => { try { scanner.clear(); } catch(e) {} });
+        } else {
+          try { scanner.clear(); } catch(e) {}
+        }
+      } catch(e) {
+        try { scanner.clear(); } catch(e2) {}
+      }
     }
     hideModal("qrScannerModal");
   }
@@ -1201,8 +1211,10 @@
       b.textContent = label;
       b.className = "w-full py-3 bg-yellow-400 hover:bg-yellow-300 text-zinc-900 font-bold rounded-2xl transition mb-2";
       b.addEventListener("click", () => {
-        closeQrScanner();
-        setTimeout(handler, 50);
+        try { closeQrScanner(); } catch(e) { hideModal("qrScannerModal"); }
+        setTimeout(() => {
+          try { handler(); } catch(e) { showToast("Action failed: " + (e?.message || e), "error"); }
+        }, 80);
       });
       actionsDiv.appendChild(b);
     };
