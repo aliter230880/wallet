@@ -554,7 +554,7 @@
           <input type="number" id="paymentRequestAmount" class="input-field text-sm"
             placeholder="0.00" step="any" min="0" oninput="updatePaymentQR()">
         </div>
-        <div id="paymentQrContainer" class="mx-auto mb-4 flex items-center justify-center bg-white rounded-2xl p-3" style="width:196px;height:196px;">
+        <div id="paymentQrContainer" class="mx-auto mb-4 flex items-center justify-center bg-white rounded-2xl p-4" style="width:280px;height:280px;">
           <p class="text-zinc-400 text-xs">Enter amount to generate QR</p>
         </div>
         <div id="paymentQrInfo" class="hidden">
@@ -1083,12 +1083,14 @@
       try {
         new QRCode(container, {
           text: uri,
-          width: 170,
-          height: 170,
+          width: 256,
+          height: 256,
           colorDark: "#000000",
           colorLight: "#ffffff",
-          correctLevel: QRCode.CorrectLevel.M
+          correctLevel: QRCode.CorrectLevel.H
         });
+        const img = container.querySelector("img, canvas");
+        if (img) { img.style.width = "100%"; img.style.height = "100%"; img.style.imageRendering = "pixelated"; }
       } catch(e) {
         container.innerHTML = '<span class="text-xs text-red-400 p-2">QR generation failed</span>';
       }
