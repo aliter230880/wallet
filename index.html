@@ -1051,14 +1051,17 @@
     if (!amount || parseFloat(amount) <= 0) return null;
 
     const chainId = wallet.networkId;
+    // Use compact param names to keep QR small & scannable: a=amount, c=chain,
+    // s=token symbol, k=contract, d=decimals. Long names still accepted on read.
     const params = new URLSearchParams();
     params.set("to", addr);
-    params.set("amount", amount);
-    params.set("chain", chainId.toString());
+    params.set("a", amount);
+    params.set("c", chainId.toString());
     if (tokenSym && wallet.tokens[tokenSym]) {
-      params.set("token", tokenSym);
-      params.set("contract", wallet.tokens[tokenSym].address);
-      params.set("decimals", (wallet.tokens[tokenSym].decimals || 18).toString());
+      params.set("s", tokenSym);
+      params.set("k", wallet.tokens[tokenSym].address);
+      const dec = wallet.tokens[tokenSym].decimals || 18;
+      if (dec !== 18) params.set("d", dec.toString());
     }
     return `${WALLET_SITE_URL}?pay=1&${params.toString()}`;
   }
@@ -1279,12 +1282,14 @@
 
   function openPaymentRequestFromParams(params) {
     pendingPayment = null;
-    const to       = params.get("to");
-    const amount   = params.get("amount");
-    const chain    = parseInt(params.get("chain") || "137");
-    const token    = params.get("token") || "";
-    const contract = params.get("contract") || "";
-    const decimals = parseInt(params.get("decimals") || "18");
+    // Accept both compact (a/c/s/k/d) and legacy (amount/chain/token/contract/decimals) names.
+    const pick = (...keys) => { for (const k of keys) { const v = params.get(k); if (v != null && v !== "") return v; } return null; };
+    const to       = pick("to");
+    const amount   = pick("a", "amount");
+    const chain    = parseInt(pick("c", "chain") || "137");
+    const token    = pick("s", "token") || "";
+    const contract = pick("k", "contract") || "";
+    const decimals = parseInt(pick("d", "decimals") || "18");
 
     if (!to || !amount) {
       showToast("Payment link missing recipient or amount", "error");
@@ -2089,12 +2094,13 @@
     const params = new URLSearchParams(window.location.search);
     if (params.get("pay") !== "1") return;
 
-    const to = params.get("to");
-    const amount = params.get("amount");
-    const chain = parseInt(params.get("chain") || "137");
-    const token = params.get("token") || "";
-    const contract = params.get("contract") || "";
-    const decimals = parseInt(params.get("decimals") || "18");
+    const pick = (...keys) => { for (const k of keys) { const v = params.get(k); if (v != null && v !== "") return v; } return null; };
+    const to = pick("to");
+    const amount = pick("a", "amount");
+    const chain = parseInt(pick("c", "chain") || "137");
+    const token = pick("s", "token") || "";
+    const contract = pick("k", "contract") || "";
+    const decimals = parseInt(pick("d", "decimals") || "18");
 
     if (!to || !amount) return;
 
